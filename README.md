@@ -1,17 +1,13 @@
-# Typesense Wordpress Indexer
+# Image downloader
 
-Index bài viết trong Wordpress vào Typesense một cách nhanh chóng mà không phải index qua plugin [Search with Typesense](https://wordpress.org/plugins/search-with-typesense/) rất chậm chạp mà không có checkpoint để recover giữa chừng.
+Tải xuống hình ảnh thumbnail trong Wordpress và upload vào S3/S3-compatible storage
 
-## Các nội dung được index:
+## Các dạng bài sẽ được tải ảnh
 
-- Thông tin basic của post (như ID, title, ngày tháng tạo, tác giả, etc)
-- Permalink
-- Tag (kèm link)
-- Category (kèm link)
+- Attactment có mimeype dạng `image/*` trong các `post` và `product` của WooCommerce
 
 ## Tính năng
 
-- Nhanh hơn index bằng plugin mặc định của Typesense (2 ngày -> 20 phút cho ~350k post)
 - Checkpoint để có thể chạy recover giữa chừng
 
 ## HDSD
@@ -33,23 +29,21 @@ cp config.template.ini config.ini
 2. Điền các thông tin còn thiếu vào `config.ini`, ví dụ như dưới đây:
 
 ```ini
-[wordpress]
-host=https://example.com
-
 [mysql]
-host=mysql.example.com
+host=127.0.0.1
 port=3306
-
-user=admin
+user=some_user
 password=some_password
+db_name=some_db
 
-db_name=dbname
+[s3]
+bucket_name=some-bucket
 
-[typesense]
-host=typesense.example.com
-port=443
-protocol=https
-api_key=some_api_key ; điền api key có thể index được document
+endpoint_url=https://some-endpoint.com ; để trống nếu dùng AWS S3, điền endpoint nếu dùng dịch vụ S3-compatible
+access_key_id=some-access-key
+secret_access_key=some-secret-key
+
+cdn_url=https://image-cdn.example.com ; CDN prefix để tạo ra URL cuối cùng
 ```
 
 3. Tạo virtual environment và cài các thư viện Python cần thiết
@@ -69,7 +63,7 @@ source venv/bin/activate
 
 1. Nếu muốn chạy lại từ đầu, xoá file `checkpoint.txt`.
 
-2. Copy file `ids.txt` vào cùng chỗ với `indexer.py`, file `ids.txt` có định dạng mỗi post id một dòng:
+2. Copy file `ids.txt` vào cùng chỗ với `downloader.py`, file `ids.txt` có định dạng mỗi post id một dòng:
 
 ```
 12345
@@ -82,17 +76,19 @@ source venv/bin/activate
 
 3. Chạy lệnh index:
 ```sh
-python indexer.py
+python downloader.py
 ```
+
 
 ## Lưu ý
 
 1. Checkpoint chỉ hoạt động đúng nếu file `ids.txt` không thay đổi.
 2. Trong trường hợp chết giữa chừng, chỉ cần chạy lại lệnh như mục 3 ở mục trên.
+3. Nếu cần tải lại hết ảnh từ đầu, chạy lệnh sau:
+```sh
+python downloader.py --all
+```
 
 ## Giới hạn
-Code này chỉ blackbox reverse engineering kết quả đầu ra và database đầu vào, kèm theo code có sẵn của Wordpress và plugin [Search with Typesense](https://wordpress.org/plugins/search-with-typesense/) mà không biết config của server và các nội dung được index thêm của các plugin khác, nên kết quả thực tế khi index qua plugin [Search with Typesense](https://wordpress.org/plugins/search-with-typesense/) có thể sẽ khác so với kết quả của code này.
-
-## TODO
-- Better CLI
-- Create permalink base on `wp_options.option_name='permalink_structure'`. Currently permalink is hard-coded to structure which is equivalent to `%category%/%postname%/%author`
+- Hiện tại chỉ detect được ảnh gắn trong bài dưới dạng attachment, có mimetype dạng `image/*`. Ngoài ra chưa tìm được những chỗ khác để tải thêm ảnh
+- Chưa detect nội dung tải về có phải ảnh thật không để báo lỗi
