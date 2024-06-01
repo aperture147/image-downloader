@@ -114,7 +114,7 @@ def get_full_post_id_list():
     with db_conn.cursor() as cur:
         cur.execute("""
             SELECT id FROM wp_posts
-            WHERE p.post_type IN ('post', 'product')
+            WHERE post_type IN ('post', 'product')
         """)
         result = cur.fetchall()
     id_list = [x for x, in result]
