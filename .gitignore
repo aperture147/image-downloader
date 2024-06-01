@@ -453,3 +453,4 @@ $RECYCLE.BIN/
 config.ini
 *.csv
 *.txt
+!requirements.txt

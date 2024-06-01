@@ -1,0 +1,3 @@
+PyMySQL
+boto3
+requests
