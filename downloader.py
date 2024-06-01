@@ -101,6 +101,7 @@ def get_thumbnail_link(post_id_list):
         """, ['image/%', post_id_list])
         
         post_thumb_list = cur.fetchall()
+        print('image count:', len(post_thumb_list))
     return post_thumb_list
 
 def backup_id_and_checkpoint():
