@@ -10,8 +10,9 @@ from time import time, perf_counter, sleep
 import shutil
 import math
 import random
+import re
 
-
+NON_ASCII_CHAR_REGEX = r'[^\x00-\x7F]+'
 
 IDS_FILE = 'ids.txt'
 CHECKPOINT_FILE = 'checkpoint.txt'
@@ -192,9 +193,10 @@ def main():
                 post_category_id_list = post_taxonomy_dict.get(post_id, {}).get('product_cat', [])
                 term_slug_list = []
                 for category_id in post_category_id_list:
-                    term_slug_list.append(taxonomy_dict[category_id][1])
+                    term_slug_list.append(re.sub(taxonomy_dict[category_id][1], '-', post_name)) # safe slug
                 image_number = post_image_counter_dict.setdefault(post_id, 1)
-                image_obj_key = os.path.join('3d-model', *term_slug_list, f'{post_name}-{str(image_number).rjust(3, "0")}.jpg')
+                safe_post_name = re.sub(NON_ASCII_CHAR_REGEX, '-', post_name)
+                image_obj_key = os.path.join('3d-model', *term_slug_list, f'{safe_post_name}-{str(image_number).rjust(3, "0")}.jpg')
                 post_image_counter_dict[post_id] = image_number + 1
                 futures.append(executor.submit(put_image, image_id, image_link, image_obj_key))
 
