@@ -18,10 +18,10 @@ parser = argparse.ArgumentParser(
     prog='Image Downloader',
     description='Image Downloader from Wordpress Database'
 )
-args = parser.parse_args()
 parser.add_argument(
     '--all', action='store_true',
     help='download images from all posts')
+args = parser.parse_args()
 download_all = args.all
 
 config = ConfigParser()
