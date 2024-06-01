@@ -122,7 +122,7 @@ def get_full_post_id_list():
     with open(IDS_FILE, 'a') as f:
         for post_id in id_list[:-1]:
             f.write(f'{post_id}\n')
-        f.write(f'{post_id[-1]}')
+        f.write(f'{id_list[-1]}')
     return id_list
 
 def get_post_id_list_from_file():
