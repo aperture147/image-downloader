@@ -6,9 +6,12 @@ import requests
 # from urllib.parse import urlparse
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from time import time, perf_counter
+from time import time, perf_counter, sleep
 import shutil
 import math
+import random
+
+
 
 IDS_FILE = 'ids.txt'
 CHECKPOINT_FILE = 'checkpoint.txt'
@@ -199,14 +202,17 @@ def main():
                 new_image_url = os.path.join(s3_cdn_url, image_obj_key)
                 params.append((new_image_url, image_id))
             
-            # with db_conn.cursor() as cur:
-            #     cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
+            with db_conn.cursor() as cur:
+                cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
             
-            # db_conn.commit()
+            db_conn.commit()
             end = perf_counter()
             print('finished chunk', i, 'elapsed time', end - start, 'seconds')
             write_checkpoint(i)
             print('checkpoint saved')
+            print('wait for cooldown on 3-5s')
+            
+            sleep(3 + random.randint(0, 2))
 
     end_time = time()
     if os.path.isfile(CHECKPOINT_FILE):
