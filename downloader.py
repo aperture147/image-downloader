@@ -207,7 +207,7 @@ def main():
             
             db_conn.commit()
             end = perf_counter()
-            print('finished chunk', i, 'elapsed time', end - start, 'seconds')
+            print(f'finished chunk {i}/{chunk_count},', 'elapsed time', end - start, 'seconds')
             write_checkpoint(i)
             print('checkpoint saved')
             print('wait for cooldown on 3-5s')
