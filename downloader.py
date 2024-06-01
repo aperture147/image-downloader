@@ -93,9 +93,9 @@ def get_thumbnail_link(post_id_list):
             JOIN wp_posts AS image_p
                 ON p.ID = image_p.post_parent
                 AND image_p.post_type = 'attachment'
-                AND image_p.post_mime_type LIKE 'image/%'
+                AND image_p.post_mime_type LIKE %s
             WHERE p.post_type IN ('post', 'product') AND p.id IN %s
-        """, [post_id_list])
+        """, ['image/%', post_id_list])
         
         post_thumb_list = cur.fetchall()
     return post_thumb_list
@@ -199,10 +199,10 @@ def main():
                 new_image_url = os.path.join(s3_cdn_url, image_obj_key)
                 params.append((new_image_url, image_id))
             
-            with db_conn.cursor() as cur:
-                cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
+            # with db_conn.cursor() as cur:
+            #     cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
             
-            db_conn.commit()
+            # db_conn.commit()
             end = perf_counter()
             print('finished chunk', i, 'elapsed time', end - start, 'seconds')
             write_checkpoint(i)
