@@ -11,11 +11,13 @@ import shutil
 import math
 import random
 import re
+import csv
 
-NON_ASCII_CHAR_REGEX = r'[^\x00-\x7F]+'
+URL_UNSAFE_CHARACTER_REGEX = r'[^a-zA-Z0-9\-_\.]'
 
 IDS_FILE = 'ids.txt'
 CHECKPOINT_FILE = 'checkpoint.txt'
+POST_IMAGE_CSV_FILE = 'post_image.csv'
 CHUNK_SIZE = 100
 
 parser = argparse.ArgumentParser(
@@ -105,14 +107,27 @@ def get_thumbnail_link(post_id_list):
         print('image count:', len(post_thumb_list))
     return post_thumb_list
 
-def backup_id_and_checkpoint():
-    now = int(time())
+def backup_id_and_checkpoint(now = int(time())):
     if os.path.isfile(IDS_FILE):
-        shutil.copy(IDS_FILE, f'ids-backup-{now}.txt')
+        shutil.copy(IDS_FILE, f'backup-{now}-{IDS_FILE}')
         os.remove(IDS_FILE)
     if os.path.isfile(CHECKPOINT_FILE):
-        shutil.copy(CHECKPOINT_FILE, f'checkpoint-backup-{now}.txt')
+        shutil.copy(CHECKPOINT_FILE, f'backup-{now}-{CHECKPOINT_FILE}')
         os.remove(CHECKPOINT_FILE)
+
+def backup_post_image_csv(now = int(time())):
+    if os.path.isfile(POST_IMAGE_CSV_FILE):
+        shutil.copy(POST_IMAGE_CSV_FILE, f'backup-{now}-{POST_IMAGE_CSV_FILE}')
+
+def init_post_image_csv():
+    with open(POST_IMAGE_CSV_FILE, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['id', 'old_link', 'new_link'])
+
+def append_post_image_csv(post_list):
+    with open(POST_IMAGE_CSV_FILE, 'a') as f:
+        writer = csv.writer(f)
+        writer.writerows(post_list)
 
 def get_full_post_id_list():
     print('fetching all post')
@@ -123,7 +138,10 @@ def get_full_post_id_list():
         """)
         result = cur.fetchall()
     id_list = [x for x, in result]
-    backup_id_and_checkpoint()
+    now = int(time())
+    backup_id_and_checkpoint(now)
+    backup_post_image_csv(now)
+    init_post_image_csv()
     with open(IDS_FILE, 'a') as f:
         for post_id in id_list[:-1]:
             f.write(f'{post_id}\n')
@@ -163,7 +181,7 @@ def put_image(image_id, image_url, s3_object_key):
         print(resp['ResponseMetadata'])
         raise Exception('failed to put data to S3')
     print(f'image put to {s3_object_key}')
-    return image_id, s3_object_key
+    return image_id, image_url, s3_object_key
 
 def main():
     start_time = time()
@@ -177,6 +195,9 @@ def main():
     last_chunk = read_checkpoint()
     if last_chunk:
         print('last checkpoint chunk:', last_chunk)
+    else:
+        backup_post_image_csv()
+        init_post_image_csv()
     with ThreadPoolExecutor() as executor:
         for i in range(last_chunk, chunk_count):
             chunk = post_id_list[i * CHUNK_SIZE: (i+1) * CHUNK_SIZE]
@@ -187,6 +208,7 @@ def main():
             taxonomy_dict, post_taxonomy_dict = get_taxonomy(chunk)
 
             params = []
+            post_list_rows = []
             post_image_counter_dict = {}
             futures = []
             for post_id, post_name, image_id, image_link in post_thumb_list:
@@ -195,14 +217,15 @@ def main():
                 for category_id in post_category_id_list:
                     term_slug_list.append(re.sub(taxonomy_dict[category_id][1], '-', post_name)) # safe slug
                 image_number = post_image_counter_dict.setdefault(post_id, 1)
-                safe_post_name = re.sub(NON_ASCII_CHAR_REGEX, '-', post_name)
+                safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
                 image_obj_key = os.path.join('3d-model', *term_slug_list, f'{safe_post_name}-{str(image_number).rjust(3, "0")}.jpg')
                 post_image_counter_dict[post_id] = image_number + 1
                 futures.append(executor.submit(put_image, image_id, image_link, image_obj_key))
 
             for future in as_completed(futures):
-                image_id, image_obj_key = future.result()
+                image_id, image_url, image_obj_key = future.result()
                 new_image_url = os.path.join(s3_cdn_url, image_obj_key)
+                post_list_rows.append([image_id, image_url, new_image_url])
                 params.append((new_image_url, image_id))
             
             with db_conn.cursor() as cur:
@@ -212,14 +235,16 @@ def main():
             end = perf_counter()
             print(f'finished chunk {i}/{chunk_count},', 'elapsed time', end - start, 'seconds')
             write_checkpoint(i)
+            append_post_image_csv(post_list_rows)
             print('checkpoint saved')
-            print('wait for cooldown on 3-5s')
+            print('waiting for cooldown on 3-5s')
             
             sleep(3 + random.randint(0, 2))
 
     end_time = time()
     if os.path.isfile(CHECKPOINT_FILE):
         os.remove(CHECKPOINT_FILE)
+    backup_id_and_checkpoint()
     print('total elapsed time', end_time - start_time, 'seconds')
 
 if __name__ == '__main__':
