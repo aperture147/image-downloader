@@ -12,12 +12,14 @@ import math
 import random
 import re
 import csv
+import phpserialize
 
 URL_UNSAFE_CHARACTER_REGEX = r'[^a-zA-Z0-9\-_\.]'
 
 IDS_FILE = 'ids.txt'
 CHECKPOINT_FILE = 'checkpoint.txt'
 POST_IMAGE_CSV_FILE = 'post_image.csv'
+POST_META_IMAGE_CSV_FILE = 'post_meta_image.csv'
 CHUNK_SIZE = 100
 
 parser = argparse.ArgumentParser(
@@ -94,12 +96,15 @@ def get_taxonomy(post_id_list):
 def get_thumbnail_link(post_id_list):
     with db_conn.cursor() as cur:
         cur.execute("""
-            SELECT DISTINCT p.id, p.post_name, image_p.id, image_p.guid
+            SELECT DISTINCT p.id, p.post_name, image_p.id, image_p.guid, pm.meta_id, pm.meta_value
             FROM wp_posts AS p
-            JOIN wp_posts AS image_p
+            LEFT JOIN wp_posts AS image_p
                 ON p.ID = image_p.post_parent
                 AND image_p.post_type = 'attachment'
                 AND image_p.post_mime_type LIKE %s
+            LEFT JOIN wp_postmeta AS pm
+                ON p.ID = pm.post_id
+                AND pm.meta_key = '_external_images'
             WHERE p.post_type IN ('post', 'product') AND p.id IN %s
         """, ['image/%', post_id_list])
         
@@ -124,8 +129,22 @@ def init_post_image_csv():
         writer = csv.writer(f)
         writer.writerow(['id', 'old_link', 'new_link'])
 
+def backup_post_meta_image_csv(now = int(time())):
+    if os.path.isfile(POST_META_IMAGE_CSV_FILE):
+        shutil.copy(POST_META_IMAGE_CSV_FILE, f'backup-{now}-{POST_META_IMAGE_CSV_FILE}')
+
+def init_post_meta_image_csv():
+    with open(POST_META_IMAGE_CSV_FILE, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['id', 'old_data', 'new_data'])
+
 def append_post_image_csv(post_list):
     with open(POST_IMAGE_CSV_FILE, 'a') as f:
+        writer = csv.writer(f)
+        writer.writerows(post_list)
+
+def append_post_meta_image_csv(post_list):
+    with open(POST_META_IMAGE_CSV_FILE, 'a') as f:
         writer = csv.writer(f)
         writer.writerows(post_list)
 
@@ -141,7 +160,9 @@ def get_full_post_id_list():
     now = int(time())
     backup_id_and_checkpoint(now)
     backup_post_image_csv(now)
+    backup_post_meta_image_csv(now)
     init_post_image_csv()
+    init_post_meta_image_csv()
     with open(IDS_FILE, 'a') as f:
         for post_id in id_list[:-1]:
             f.write(f'{post_id}\n')
@@ -167,7 +188,7 @@ def read_checkpoint():
         print('corrupted checkpoint file, reset to 0')
         return 0
 
-def put_image(image_id, image_url, s3_object_key):
+def put_post_image(image_id, image_url, s3_object_key):
     print(f'downloading {image_url} to {s3_object_key}')
     with requests.get(image_url, allow_redirects=True) as r:
         r.raise_for_status()
@@ -183,6 +204,29 @@ def put_image(image_id, image_url, s3_object_key):
     print(f'image put to {s3_object_key}')
     return image_id, image_url, s3_object_key
 
+def put_post_meta_image(meta_id, safe_post_name, image_obj_prefix, post_meta_str):
+    image_link_dict = phpserialize.loads(post_meta_str.encode(), decode_strings=True)
+    data_dict = {}
+    for index, image_url in image_link_dict.items():
+        print(post_meta_str)
+        s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-meta-{str(index).rjust(3, "0")}.jpg')
+        print(f'downloading {image_url} to {s3_object_key}')
+        with requests.get(image_url, allow_redirects=True) as r:
+            r.raise_for_status()
+            img_content = r.content
+        resp = s3_client.put_object(
+            Bucket=s3_bucket_name,
+            Key=s3_object_key,
+            Body=img_content,
+        )
+        if resp['ResponseMetadata']['HTTPStatusCode'] >= 300:
+            print(resp['ResponseMetadata'])
+            raise Exception('failed to put data to S3')
+        print(f'image put to {s3_object_key}')
+        data_dict[index] = os.path.join(s3_cdn_url, s3_object_key)
+    new_serialized_meta = phpserialize.dumps(data_dict).decode()
+    return meta_id, post_meta_str, new_serialized_meta
+
 def main():
     start_time = time()
     if download_all:
@@ -197,51 +241,72 @@ def main():
         print('last checkpoint chunk:', last_chunk)
     else:
         backup_post_image_csv()
+        backup_post_meta_image_csv()
         init_post_image_csv()
-    with ThreadPoolExecutor() as executor:
-        for i in range(last_chunk, chunk_count):
-            db_conn.ping()
+        init_post_meta_image_csv()
+    
+    for i in range(last_chunk, chunk_count):
+        db_conn.ping()
+        with ThreadPoolExecutor() as executor:
             chunk = post_id_list[i * CHUNK_SIZE: (i+1) * CHUNK_SIZE]
             post_thumb_list = get_thumbnail_link(chunk)
             print('processing chunk', i)
             start = perf_counter()
-            chunk = list(set(post_id for post_id, *_ in post_thumb_list))
-            taxonomy_dict, post_taxonomy_dict = get_taxonomy(chunk)
+            chunk_post_id_list = list(set(post_id for post_id, *_ in post_thumb_list))
+            print(chunk_post_id_list)
+            taxonomy_dict, post_taxonomy_dict = get_taxonomy(chunk_post_id_list)
 
             params = []
+            post_meta_params = []
             post_list_rows = []
+            post_meta_rows = []
             post_image_counter_dict = {}
-            futures = []
-            for post_id, post_name, image_id, image_link in post_thumb_list:
+            post_image_futures = []
+            post_meta_image_futures = []
+            downloaded_post_meta = set()
+
+            for post_id, post_name, image_id, image_link, post_meta_id, post_meta_image_str in post_thumb_list:
                 post_category_id_list = post_taxonomy_dict.get(post_id, {}).get('product_cat', [])
                 term_slug_list = []
                 for category_id in post_category_id_list:
                     term_slug_list.append(re.sub(URL_UNSAFE_CHARACTER_REGEX, '', taxonomy_dict[category_id][1])) # safe slug
                 image_number = post_image_counter_dict.setdefault(post_id, 1)
                 safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
-                image_obj_key = os.path.join('3d-model', *term_slug_list, f'{safe_post_name}-{str(image_number).rjust(3, "0")}.jpg')
+                image_obj_prefix = os.path.join('3d-model', *term_slug_list)
+                image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(image_number).rjust(3, "0")}.jpg')
                 post_image_counter_dict[post_id] = image_number + 1
-                futures.append(executor.submit(put_image, image_id, image_link, image_obj_key))
+                if image_id and image_link:
+                    post_image_futures.append(executor.submit(put_post_image, image_id, image_link, image_obj_key))
+                if not (post_meta_id and post_meta_image_str):
+                    continue
+                if post_id in downloaded_post_meta:
+                    continue
+                post_meta_image_futures.append(executor.submit(put_post_meta_image, post_meta_id, safe_post_name, image_obj_prefix, post_meta_image_str))
 
-            for future in as_completed(futures):
+            for future in as_completed(post_image_futures):
                 image_id, image_url, image_obj_key = future.result()
                 new_image_url = os.path.join(s3_cdn_url, image_obj_key)
                 post_list_rows.append([image_id, image_url, new_image_url])
                 params.append((new_image_url, image_id))
-            
-            with db_conn.cursor() as cur:
-                cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
-            
-            db_conn.commit()
-            end = perf_counter()
-            print(f'finished chunk {i}/{chunk_count},', 'elapsed time', end - start, 'seconds')
-            write_checkpoint(i)
-            print('checkpoint saved')
-            append_post_image_csv(post_list_rows)
-            print('post csv updated')
-            print('waiting for cooldown on 1-3s')
-            
-            sleep(1 + random.randint(0, 2))
+
+            for future in as_completed(post_meta_image_futures):
+                meta_id, old_meta_value, new_meta_value = future.result()
+                post_meta_rows.append([meta_id, old_meta_value, new_meta_value])
+                post_meta_params.append([new_meta_value, meta_id])
+        # with db_conn.cursor() as cur:
+        #     cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
+        #     cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE id=%s', post_meta_params)
+        
+        # db_conn.commit()
+        end = perf_counter()
+        print(f'finished chunk {i}/{chunk_count},', 'elapsed time', end - start, 'seconds')
+        write_checkpoint(i)
+        print('checkpoint saved')
+        append_post_image_csv(post_list_rows)
+        append_post_meta_image_csv(post_meta_rows)
+        print('post csv updated')
+        print('waiting for cooldown on 1-3s')
+        sleep(1 + random.randint(0, 2))
 
     end_time = time()
     if os.path.isfile(CHECKPOINT_FILE):
