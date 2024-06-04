@@ -212,7 +212,6 @@ def put_post_meta_image(meta_id, safe_post_name, image_obj_prefix, post_meta_str
     image_link_dict = phpserialize.loads(post_meta_str.encode(), decode_strings=True)
     data_dict = {}
     for index, image_url in image_link_dict.items():
-        print(post_meta_str)
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-meta-{str(index).rjust(3, "0")}.jpg')
         print(f'downloading {image_url} to {s3_object_key}')
         with requests.get(image_url, allow_redirects=True) as r:
@@ -257,7 +256,6 @@ def main():
             print('processing chunk', i)
             start = perf_counter()
             chunk_post_id_list = list(set(post_id for post_id, *_ in post_thumb_list))
-            print(chunk_post_id_list)
             taxonomy_dict, post_taxonomy_dict = get_taxonomy(chunk_post_id_list)
 
             params = []
@@ -300,7 +298,7 @@ def main():
         if not dry_run:
             with db_conn.cursor() as cur:
                 cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
-                cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE id=%s', post_meta_params)
+                cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
             
             db_conn.commit()
         end = perf_counter()
