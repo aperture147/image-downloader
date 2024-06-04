@@ -3,6 +3,7 @@ from configparser import ConfigParser
 import argparse
 import boto3
 import requests
+from requests.exceptions import HTTPError
 # from urllib.parse import urlparse
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -194,9 +195,14 @@ def read_checkpoint():
 
 def put_post_image(image_id, image_url, s3_object_key):
     print(f'downloading {image_url} to {s3_object_key}')
-    with requests.get(image_url, allow_redirects=True) as r:
-        r.raise_for_status()
-        img_content = r.content
+    try:
+        with requests.get(image_url, allow_redirects=True) as r:
+            r.raise_for_status()
+            img_content = r.content
+    except HTTPError as e:
+        if e.response.status_code == 404:
+            return image_id, image_url, None
+        raise e
     resp = s3_client.put_object(
         Bucket=s3_bucket_name,
         Key=s3_object_key,
@@ -214,9 +220,15 @@ def put_post_meta_image(meta_id, safe_post_name, image_obj_prefix, post_meta_str
     for index, image_url in image_link_dict.items():
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-meta-{str(index).rjust(3, "0")}.jpg')
         print(f'downloading {image_url} to {s3_object_key}')
-        with requests.get(image_url, allow_redirects=True) as r:
-            r.raise_for_status()
-            img_content = r.content
+        try:
+            with requests.get(image_url, allow_redirects=True) as r:
+                r.raise_for_status()
+                img_content = r.content
+        except HTTPError as e:
+            if e.response.status_code == 404:
+                data_dict[index] = image_url
+                continue
+            raise e
         resp = s3_client.put_object(
             Bucket=s3_bucket_name,
             Key=s3_object_key,
