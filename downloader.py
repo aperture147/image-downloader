@@ -40,7 +40,7 @@ db_conn = pymysql.connect(
     host=mysql_config['host'], port=int(mysql_config['port']),
     user=mysql_config['user'], passwd=mysql_config['password'], 
     db=mysql_config['db_name'],
-    connect_timeout=300,
+    connect_timeout=31536000,
     autocommit=False
 )
 print('db connected')
