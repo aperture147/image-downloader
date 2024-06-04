@@ -261,7 +261,6 @@ def main():
         init_post_meta_image_csv()
     
     for i in range(last_chunk, chunk_count):
-        db_conn.ping()
         with ThreadPoolExecutor() as executor:
             chunk = post_id_list[i * CHUNK_SIZE: (i+1) * CHUNK_SIZE]
             post_thumb_list = get_thumbnail_link(chunk)
@@ -308,6 +307,7 @@ def main():
                 post_meta_rows.append([meta_id, old_meta_value, new_meta_value])
                 post_meta_params.append([new_meta_value, meta_id])
         if not dry_run:
+            db_conn.ping(reconnect=True)
             with db_conn.cursor() as cur:
                 cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
                 cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
