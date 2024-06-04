@@ -29,8 +29,12 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     '--all', action='store_true',
     help='download images from all posts')
+parser.add_argument(
+    '--dryrun', action='store_true',
+    help="No update database")
 args = parser.parse_args()
 download_all = args.all
+dry_run = args.dryrun
 
 config = ConfigParser()
 config.read('config.ini')
@@ -293,11 +297,12 @@ def main():
                 meta_id, old_meta_value, new_meta_value = future.result()
                 post_meta_rows.append([meta_id, old_meta_value, new_meta_value])
                 post_meta_params.append([new_meta_value, meta_id])
-        # with db_conn.cursor() as cur:
-        #     cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
-        #     cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE id=%s', post_meta_params)
-        
-        # db_conn.commit()
+        if not dry_run:
+            with db_conn.cursor() as cur:
+                cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
+                cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE id=%s', post_meta_params)
+            
+            db_conn.commit()
         end = perf_counter()
         print(f'finished chunk {i}/{chunk_count},', 'elapsed time', end - start, 'seconds')
         write_checkpoint(i)
