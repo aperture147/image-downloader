@@ -200,6 +200,7 @@ def main():
         init_post_image_csv()
     with ThreadPoolExecutor() as executor:
         for i in range(last_chunk, chunk_count):
+            db_conn.ping()
             chunk = post_id_list[i * CHUNK_SIZE: (i+1) * CHUNK_SIZE]
             post_thumb_list = get_thumbnail_link(chunk)
             print('processing chunk', i)
@@ -215,7 +216,7 @@ def main():
                 post_category_id_list = post_taxonomy_dict.get(post_id, {}).get('product_cat', [])
                 term_slug_list = []
                 for category_id in post_category_id_list:
-                    term_slug_list.append(re.sub(taxonomy_dict[category_id][1], '-', post_name)) # safe slug
+                    term_slug_list.append(re.sub(URL_UNSAFE_CHARACTER_REGEX, '', taxonomy_dict[category_id][1])) # safe slug
                 image_number = post_image_counter_dict.setdefault(post_id, 1)
                 safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
                 image_obj_key = os.path.join('3d-model', *term_slug_list, f'{safe_post_name}-{str(image_number).rjust(3, "0")}.jpg')
@@ -235,11 +236,12 @@ def main():
             end = perf_counter()
             print(f'finished chunk {i}/{chunk_count},', 'elapsed time', end - start, 'seconds')
             write_checkpoint(i)
-            append_post_image_csv(post_list_rows)
             print('checkpoint saved')
-            print('waiting for cooldown on 3-5s')
+            append_post_image_csv(post_list_rows)
+            print('post csv updated')
+            print('waiting for cooldown on 1-3s')
             
-            sleep(3 + random.randint(0, 2))
+            sleep(1 + random.randint(0, 2))
 
     end_time = time()
     if os.path.isfile(CHECKPOINT_FILE):
