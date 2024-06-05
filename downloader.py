@@ -24,11 +24,10 @@ POST_IMAGE_CSV_FILE = 'post_image.csv'
 POST_META_IMAGE_CSV_FILE = 'post_meta_image.csv'
 CHUNK_SIZE = 100
 
-MAX_RETRIES = 3
 MAX_POOL_SIZE = 50
 
 session = requests.Session()
-retries = Retry(total=MAX_RETRIES, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+retries = Retry(backoff_factor=1, status_forcelist=[500, 502, 503, 504])
 adapter = HTTPAdapter(max_retries=retries, pool_maxsize=MAX_POOL_SIZE)
 session.mount('https://', adapter)
 session.mount('http://', adapter)
