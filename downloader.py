@@ -307,6 +307,10 @@ def main():
 
             for future in as_completed(post_image_futures):
                 image_id, image_url, image_obj_key = future.result()
+                if not image_obj_key:
+                    print(f'image {image_id} is not found')
+                    post_list_rows.append([image_id, image_url, image_url])
+                    continue
                 new_image_url = os.path.join(s3_cdn_url, image_obj_key)
                 post_list_rows.append([image_id, image_url, new_image_url])
                 params.append((new_image_url, image_id))
