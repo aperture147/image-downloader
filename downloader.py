@@ -4,6 +4,7 @@ import argparse
 import boto3
 import requests
 from requests.exceptions import HTTPError
+from requests.adapters import HTTPAdapter
 # from urllib.parse import urlparse
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +23,14 @@ CHECKPOINT_FILE = 'checkpoint.txt'
 POST_IMAGE_CSV_FILE = 'post_image.csv'
 POST_META_IMAGE_CSV_FILE = 'post_meta_image.csv'
 CHUNK_SIZE = 100
+
+MAX_RETRIES = 3
+MAX_POOL_SIZE = 50
+
+session = requests.Session()
+adapter = HTTPAdapter(max_retries=MAX_RETRIES, pool_maxsize=MAX_POOL_SIZE)
+session.mount('https://', adapter)
+session.mount('http://', adapter)
 
 parser = argparse.ArgumentParser(
     prog='Image Downloader',
@@ -196,9 +205,9 @@ def read_checkpoint():
 def put_post_image(image_id, image_url, s3_object_key):
     print(f'downloading {image_url} to {s3_object_key}')
     try:
-        with requests.get(image_url, allow_redirects=True) as r:
-            r.raise_for_status()
-            img_content = r.content
+        r = session.get(image_url, allow_redirects=True)
+        r.raise_for_status()
+        img_content = r.content
     except HTTPError as e:
         if e.response.status_code == 404:
             return image_id, image_url, None
@@ -221,9 +230,9 @@ def put_post_meta_image(meta_id, safe_post_name, image_obj_prefix, post_meta_str
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-meta-{str(index).rjust(3, "0")}.jpg')
         print(f'downloading {image_url} to {s3_object_key}')
         try:
-            with requests.get(image_url, allow_redirects=True) as r:
-                r.raise_for_status()
-                img_content = r.content
+            r = session.get(image_url, allow_redirects=True)
+            r.raise_for_status()
+            img_content = r.content
         except HTTPError as e:
             if e.response.status_code == 404:
                 data_dict[index] = image_url
