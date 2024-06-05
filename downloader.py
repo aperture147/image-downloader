@@ -4,7 +4,7 @@ import argparse
 import boto3
 import requests
 from requests.exceptions import HTTPError
-from requests.adapters import HTTPAdapter
+from requests.adapters import HTTPAdapter, Retry
 # from urllib.parse import urlparse
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,7 +28,8 @@ MAX_RETRIES = 3
 MAX_POOL_SIZE = 50
 
 session = requests.Session()
-adapter = HTTPAdapter(max_retries=MAX_RETRIES, pool_maxsize=MAX_POOL_SIZE)
+retries = Retry(total=MAX_RETRIES, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retries, pool_maxsize=MAX_POOL_SIZE)
 session.mount('https://', adapter)
 session.mount('http://', adapter)
 
