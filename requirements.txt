@@ -2,3 +2,5 @@ PyMySQL
 boto3
 requests
 phpserialize
+beautifulsoup4
+lxml

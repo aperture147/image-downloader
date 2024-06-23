@@ -5,7 +5,7 @@ import boto3
 import requests
 from requests.exceptions import HTTPError
 from requests.adapters import HTTPAdapter, Retry
-# from urllib.parse import urlparse
+
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import time, perf_counter, sleep
@@ -15,6 +15,7 @@ import random
 import re
 import csv
 import phpserialize
+from bs4 import BeautifulSoup
 
 URL_UNSAFE_CHARACTER_REGEX = r'[^a-zA-Z0-9\-_\.]'
 
@@ -22,6 +23,7 @@ IDS_FILE = 'ids.txt'
 CHECKPOINT_FILE = 'checkpoint.txt'
 POST_IMAGE_CSV_FILE = 'post_image.csv'
 POST_META_IMAGE_CSV_FILE = 'post_meta_image.csv'
+POST_CONTENT_CSV_FILE = 'post_content.csv'
 CHUNK_SIZE = 100
 
 MAX_POOL_SIZE = 50
@@ -111,7 +113,7 @@ def get_taxonomy(post_id_list):
 def get_thumbnail_link(post_id_list):
     with db_conn.cursor() as cur:
         cur.execute(f"""
-            SELECT DISTINCT p.id, p.post_name, image_p.id, image_p.guid, pm.meta_id, pm.meta_value
+            SELECT DISTINCT p.id, p.post_name, p.post_content, image_p.id, image_p.guid, pm.meta_id, pm.meta_value
             FROM {table_prefix}posts AS p
             LEFT JOIN {table_prefix}posts AS image_p
                 ON p.ID = image_p.post_parent
@@ -153,15 +155,29 @@ def init_post_meta_image_csv():
         writer = csv.writer(f)
         writer.writerow(['id', 'old_data', 'new_data'])
 
+def init_post_content_csv():
+    with open(POST_CONTENT_CSV_FILE, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['id', 'old_content', 'new_content'])
+
+def backup_post_content_csv(now = int(time())):
+    if os.path.isfile(POST_CONTENT_CSV_FILE):
+        shutil.copy(POST_CONTENT_CSV_FILE, f'backup-{now}-{POST_CONTENT_CSV_FILE}')
+
 def append_post_image_csv(post_list):
     with open(POST_IMAGE_CSV_FILE, 'a') as f:
         writer = csv.writer(f)
         writer.writerows(post_list)
 
-def append_post_meta_image_csv(post_list):
+def append_post_meta_image_csv(meta_list):
     with open(POST_META_IMAGE_CSV_FILE, 'a') as f:
         writer = csv.writer(f)
-        writer.writerows(post_list)
+        writer.writerows(meta_list)
+
+def append_post_content_csv(content_list):
+    with open(POST_CONTENT_CSV_FILE, 'a') as f:
+        writer = csv.writer(f)
+        writer.writerows(content_list)
 
 def get_full_post_id_list():
     print('fetching all post')
@@ -176,8 +192,10 @@ def get_full_post_id_list():
     backup_id_and_checkpoint(now)
     backup_post_image_csv(now)
     backup_post_meta_image_csv(now)
+    backup_post_content_csv(now)
     init_post_image_csv()
     init_post_meta_image_csv()
+    init_post_content_csv()
     with open(IDS_FILE, 'a') as f:
         for post_id in id_list[:-1]:
             f.write(f'{post_id}\n')
@@ -203,7 +221,11 @@ def read_checkpoint():
         print('corrupted checkpoint file, reset to 0')
         return 0
 
-def put_post_image(image_id, image_url, s3_object_key):
+def get_ext_from_img_src(img_src, default='.jpg'):
+    _, ext = os.path.splitext(img_src)
+    return ext or default
+
+def download_and_put_image_to_s3(image_url, s3_object_key):
     print(f'downloading {image_url} to {s3_object_key}')
     try:
         r = session.get(image_url, allow_redirects=True)
@@ -211,7 +233,7 @@ def put_post_image(image_id, image_url, s3_object_key):
         img_content = r.content
     except HTTPError as e:
         if e.response.status_code == 404:
-            return image_id, image_url, None
+            return False
         raise e
     resp = s3_client.put_object(
         Bucket=s3_bucket_name,
@@ -222,32 +244,40 @@ def put_post_image(image_id, image_url, s3_object_key):
         print(resp['ResponseMetadata'])
         raise Exception('failed to put data to S3')
     print(f'image put to {s3_object_key}')
+    return True
+
+def put_post_image(image_id, image_url, s3_object_key):
+    exists = download_and_put_image_to_s3(image_url, s3_object_key)
+    if not exists:
+        return image_id, image_url, None
     return image_id, image_url, s3_object_key
+
+def put_post_content_image(post_id, safe_post_name, image_obj_prefix, post_content):
+    soup = BeautifulSoup(post_content, "lxml")
+
+    img_tag_list = soup.find_all('img')
+    for index, img_tag in enumerate(img_tag_list):
+        image_url = img_tag.attrs['src']
+        ext = get_ext_from_img_src(image_url)
+        s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-content-{str(index).rjust(3, "0")}{ext}')
+        
+        exists = download_and_put_image_to_s3(image_url, s3_object_key)
+        if not exists:
+            continue
+        img_tag.attrs['src'] = os.path.join(s3_cdn_url, s3_object_key)
+        
+    return post_id, post_content, str(soup)
 
 def put_post_meta_image(meta_id, safe_post_name, image_obj_prefix, post_meta_str):
     image_link_dict = phpserialize.loads(post_meta_str.encode(), decode_strings=True)
     data_dict = {}
     for index, image_url in image_link_dict.items():
-        s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-preview-{str(index).rjust(3, "0")}.jpg')
-        print(f'downloading {image_url} to {s3_object_key}')
-        try:
-            r = session.get(image_url, allow_redirects=True)
-            r.raise_for_status()
-            img_content = r.content
-        except HTTPError as e:
-            if e.response.status_code == 404:
-                data_dict[index] = image_url
-                continue
-            raise e
-        resp = s3_client.put_object(
-            Bucket=s3_bucket_name,
-            Key=s3_object_key,
-            Body=img_content,
-        )
-        if resp['ResponseMetadata']['HTTPStatusCode'] >= 300:
-            print(resp['ResponseMetadata'])
-            raise Exception('failed to put data to S3')
-        print(f'image put to {s3_object_key}')
+        ext = get_ext_from_img_src(image_url)
+        s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-preview-{str(index).rjust(3, "0")}{ext}')
+        exists = download_and_put_image_to_s3(image_url, s3_object_key)
+        if not exists:
+            data_dict[index] = image_url
+            continue
         data_dict[index] = os.path.join(s3_cdn_url, s3_object_key)
     new_serialized_meta = phpserialize.dumps(data_dict).decode()
     return meta_id, post_meta_str, new_serialized_meta
@@ -281,14 +311,17 @@ def main():
 
             params = []
             post_meta_params = []
+            post_content_params = []
             post_list_rows = []
             post_meta_rows = []
+            post_content_rows = []
             post_image_counter_dict = {}
             post_image_futures = []
             post_meta_image_futures = []
+            post_content_futures = []
             downloaded_post_meta = set()
 
-            for post_id, post_name, image_id, image_link, post_meta_id, post_meta_image_str in post_thumb_list:
+            for post_id, post_name, post_content, image_id, image_link, post_meta_id, post_meta_image_str in post_thumb_list:
                 post_category_id_list = post_taxonomy_dict.get(post_id, {}).get('product_cat', [])
                 term_slug_list = []
                 for category_id in post_category_id_list:
@@ -296,7 +329,8 @@ def main():
                 image_number = post_image_counter_dict.setdefault(post_id, 1)
                 safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
                 image_obj_prefix = os.path.join('3d-model', *term_slug_list)
-                image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(image_number).rjust(3, "0")}.jpg')
+                ext = get_ext_from_img_src(image_link)
+                image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(image_number).rjust(3, "0")}{ext}')
                 post_image_counter_dict[post_id] = image_number + 1
                 if image_id and image_link:
                     post_image_futures.append(executor.submit(put_post_image, image_id, image_link, image_obj_key))
@@ -305,6 +339,7 @@ def main():
                 if post_id in downloaded_post_meta:
                     continue
                 post_meta_image_futures.append(executor.submit(put_post_meta_image, post_meta_id, safe_post_name, image_obj_prefix, post_meta_image_str))
+                post_content_futures.append(executor.submit(put_post_content_image, post_id, safe_post_name, image_obj_prefix, post_content))
 
             for future in as_completed(post_image_futures):
                 image_id, image_url, image_obj_key = future.result()
@@ -320,11 +355,18 @@ def main():
                 meta_id, old_meta_value, new_meta_value = future.result()
                 post_meta_rows.append([meta_id, old_meta_value, new_meta_value])
                 post_meta_params.append([new_meta_value, meta_id])
+
+            for future in as_completed(post_content_futures):
+                post_id, old_post_content, new_post_content = future.result()
+                post_content_rows.append([post_id, old_post_content, new_post_content])
+                post_content_params.append([new_post_content, post_id])
+
         if not dry_run:
             db_conn.ping(reconnect=True)
             with db_conn.cursor() as cur:
                 cur.executemany(f'UPDATE {table_prefix}posts SET guid=%s WHERE id=%s', params)
                 cur.executemany(f'UPDATE {table_prefix}postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
+                cur.executemany(f'UPDATE {table_prefix}posts SET post_content=%s WHERE meta_id=%s', post_content_params)
             
             db_conn.commit()
         end = perf_counter()
