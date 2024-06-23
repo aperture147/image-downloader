@@ -59,6 +59,7 @@ db_conn = pymysql.connect(
     connect_timeout=31536000,
     autocommit=False
 )
+table_prefix = mysql_config['table_prefix']
 print('db connected')
 
 s3_cdn_url = s3_config['cdn_url']
@@ -73,10 +74,10 @@ print('s3 client created')
 
 def get_taxonomy(post_id_list):
     with db_conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
             SELECT DISTINCT t.term_id, tt.term_taxonomy_id, tt.parent, t.name, t.slug, tt.taxonomy
-            FROM wp_terms AS t
-            JOIN wp_term_taxonomy AS tt ON tt.term_id = t.term_id
+            FROM {table_prefix}terms AS t
+            JOIN {table_prefix}term_taxonomy AS tt ON tt.term_id = t.term_id
         """)
         
         term_taxonomy_result = cur.fetchall()
@@ -90,9 +91,9 @@ def get_taxonomy(post_id_list):
             for _, taxonomy_id, parent_id, term_name, term_slug, taxonomy_name in term_taxonomy_result
         }
         print('taxonomy adjacent list built')
-        cur.execute("""
+        cur.execute(f"""
             SELECT object_id, term_taxonomy_id
-            FROM wp_term_relationships
+            FROM {table_prefix}term_relationships
             WHERE object_id IN %s
         """, (post_id_list,))
         term_relationship_list = cur.fetchall()
@@ -109,14 +110,14 @@ def get_taxonomy(post_id_list):
     
 def get_thumbnail_link(post_id_list):
     with db_conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
             SELECT DISTINCT p.id, p.post_name, image_p.id, image_p.guid, pm.meta_id, pm.meta_value
-            FROM wp_posts AS p
-            LEFT JOIN wp_posts AS image_p
+            FROM {table_prefix}posts AS p
+            LEFT JOIN {table_prefix}posts AS image_p
                 ON p.ID = image_p.post_parent
                 AND image_p.post_type = 'attachment'
                 AND image_p.post_mime_type LIKE %s
-            LEFT JOIN wp_postmeta AS pm
+            LEFT JOIN {table_prefix}postmeta AS pm
                 ON p.ID = pm.post_id
                 AND pm.meta_key = '_external_images'
             WHERE p.post_type IN ('post', 'product') AND p.id IN %s
@@ -165,8 +166,8 @@ def append_post_meta_image_csv(post_list):
 def get_full_post_id_list():
     print('fetching all post')
     with db_conn.cursor() as cur:
-        cur.execute("""
-            SELECT id FROM wp_posts
+        cur.execute(f"""
+            SELECT id FROM {table_prefix}posts
             WHERE post_type IN ('post', 'product')
         """)
         result = cur.fetchall()
@@ -322,8 +323,8 @@ def main():
         if not dry_run:
             db_conn.ping(reconnect=True)
             with db_conn.cursor() as cur:
-                cur.executemany('UPDATE wp_posts SET guid=%s WHERE id=%s', params)
-                cur.executemany('UPDATE wp_postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
+                cur.executemany(f'UPDATE {table_prefix}posts SET guid=%s WHERE id=%s', params)
+                cur.executemany(f'UPDATE {table_prefix}postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
             
             db_conn.commit()
         end = perf_counter()
