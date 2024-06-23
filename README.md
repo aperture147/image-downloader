@@ -4,7 +4,8 @@ Tải xuống hình ảnh thumbnail trong Wordpress và upload vào S3/S3-compat
 
 ## Các dạng bài sẽ được tải ảnh
 
-- Attactment có mimeype dạng `image/*` trong các `post` và `product` của WooCommerce
+- Attachtment có mimeype dạng `image/*` trong các `post` và `product`
+- Link ảnh chứa trong `postmeta`: `_external_images`
 
 ## Tính năng
 
@@ -16,7 +17,6 @@ Tải xuống hình ảnh thumbnail trong Wordpress và upload vào S3/S3-compat
 - UNIX/Linux (đã test trên macOS Sonoma 14.5)
 - Python 3.x (đã test trên Python 3.9)
 - MySQL/MariaDB (đã test trên MariaDB 10.5.24)
-- Typesense (đã test trên Typesense v26.0)
 
 ### Chuẩn bị môi trường
 
@@ -35,6 +35,7 @@ port=3306
 user=some_user
 password=some_password
 db_name=some_db
+table_prefix=some_db
 
 [s3]
 bucket_name=some-bucket
