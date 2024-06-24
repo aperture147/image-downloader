@@ -24,7 +24,7 @@ CHECKPOINT_FILE = 'checkpoint.txt'
 POST_IMAGE_CSV_FILE = 'post_image.csv'
 POST_META_IMAGE_CSV_FILE = 'post_meta_image.csv'
 POST_CONTENT_CSV_FILE = 'post_content.csv'
-CHUNK_SIZE = 100
+CHUNK_SIZE = 50
 
 MAX_POOL_SIZE = 50
 
@@ -109,25 +109,57 @@ def get_taxonomy(post_id_list):
         print('post taxonomy list has been built')
 
         return taxonomy_dict, post_taxonomy_dict
-    
-def get_thumbnail_link(post_id_list):
+
+def get_post_name(post_id_list):
     with db_conn.cursor() as cur:
         cur.execute(f"""
-            SELECT DISTINCT p.id, p.post_name, p.post_content, image_p.id, image_p.guid, pm.meta_id, pm.meta_value
+            SELECT p.id, p.post_name
+            FROM {table_prefix}posts AS p
+            WHERE p.id IN %s
+        """, (post_id_list,))
+
+        post_name = cur.fetchall()
+    return post_name
+
+def get_external_image_list(post_id_list):
+    with db_conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT p.id, pm.meta_id, pm.meta_value
+            FROM {table_prefix}posts AS p
+            LEFT JOIN {table_prefix}postmeta AS pm
+                ON p.ID = pm.post_id
+                AND pm.meta_key = '_external_images'
+            WHERE p.id IN %s
+        """, (post_id_list,))
+
+        external_image_list = cur.fetchall()
+    return external_image_list
+
+def get_post_content_list(post_id_list):
+    with db_conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT p.id, p.post_content
+            FROM {table_prefix}posts AS p
+            WHERE p.id IN %s
+        """, (post_id_list,))
+
+        post_thumb_list = cur.fetchall()
+    return post_thumb_list
+
+def get_image_attachment_list(post_id_list):
+    with db_conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT p.id, image_p.id, image_p.guid
             FROM {table_prefix}posts AS p
             LEFT JOIN {table_prefix}posts AS image_p
                 ON p.ID = image_p.post_parent
                 AND image_p.post_type = 'attachment'
                 AND image_p.post_mime_type LIKE %s
-            LEFT JOIN {table_prefix}postmeta AS pm
-                ON p.ID = pm.post_id
-                AND pm.meta_key = '_external_images'
             WHERE p.post_type IN ('post', 'product') AND p.id IN %s
-        """, ['image/%', post_id_list])
+        """, ('image/%', post_id_list))
         
-        post_thumb_list = cur.fetchall()
-        print('image count:', len(post_thumb_list))
-    return post_thumb_list
+        attachment_list = cur.fetchall()
+    return attachment_list
 
 def backup_id_and_checkpoint(now = int(time())):
     if os.path.isfile(IDS_FILE):
@@ -184,7 +216,7 @@ def get_full_post_id_list():
     with db_conn.cursor() as cur:
         cur.execute(f"""
             SELECT id FROM {table_prefix}posts
-            WHERE post_type IN ('post', 'product')
+            WHERE post_type IN ('post', 'product') AND post_status = 'publish'
         """)
         result = cur.fetchall()
     id_list = [x for x, in result]
@@ -245,6 +277,8 @@ def download_and_put_image_to_s3(image_url, s3_object_key):
         raise Exception('failed to put data to S3')
     print(f'image put to {s3_object_key}')
     return True
+    # print(s3_object_key)
+    # return False
 
 def put_post_image(image_id, image_url, s3_object_key):
     exists = download_and_put_image_to_s3(image_url, s3_object_key)
@@ -257,8 +291,10 @@ def put_post_content_image(post_id, safe_post_name, image_obj_prefix, post_conte
 
     img_tag_list = soup.find_all('img')
     for index, img_tag in enumerate(img_tag_list):
-        image_url = img_tag.attrs['src']
+        image_url: str = img_tag.attrs['src']
         ext = get_ext_from_img_src(image_url)
+        if ext not in {'.png', '.jpg', '.jpeg'} and not image_url.startswith('https://drive.google.com/uc'):
+            continue
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-content-{str(index).rjust(3, "0")}{ext}')
         
         exists = download_and_put_image_to_s3(image_url, s3_object_key)
@@ -303,44 +339,55 @@ def main():
         init_post_content_csv()
     
     for i in range(last_chunk, chunk_count):
+        print('processing chunk', i)
         with ThreadPoolExecutor() as executor:
             chunk = post_id_list[i * CHUNK_SIZE: (i+1) * CHUNK_SIZE]
-            post_thumb_list = get_thumbnail_link(chunk)
-            print('processing chunk', i)
-            start = perf_counter()
-            chunk_post_id_list = list(set(post_id for post_id, *_ in post_thumb_list))
-            taxonomy_dict, post_taxonomy_dict = get_taxonomy(chunk_post_id_list)
+            image_attachment_list = get_image_attachment_list(chunk)
+            external_image_list = get_external_image_list(chunk)
+            post_content_list = get_post_content_list(chunk)
+            post_name_list = get_post_name(chunk)
 
+            print('total post:', len(post_name_list))
+
+            start = perf_counter()
+            
+            taxonomy_dict, post_taxonomy_dict = get_taxonomy(chunk)
+            
             params = []
             post_meta_params = []
             post_content_params = []
             post_list_rows = []
             post_meta_rows = []
             post_content_rows = []
-            post_image_counter_dict = {}
+            
             post_image_futures = []
             post_meta_image_futures = []
             post_content_futures = []
-            downloaded_post_meta = set()
 
-            for post_id, post_name, post_content, image_id, image_link, post_meta_id, post_meta_image_str in post_thumb_list:
-                post_category_id_list = post_taxonomy_dict.get(post_id, {}).get('product_cat', [])
+            image_obj_prefix_dict = {}
+
+            for post_id, post_name in post_name_list:
+                post_taxonomy = post_taxonomy_dict.get(post_id, {})
+                post_category_id_list = post_taxonomy.get('category', [])
+                if not post_category_id_list:
+                    post_category_id_list = post_taxonomy.get('product_cat', [])
                 term_slug_list = []
                 for category_id in post_category_id_list:
                     term_slug_list.append(re.sub(URL_UNSAFE_CHARACTER_REGEX, '', taxonomy_dict[category_id][1])) # safe slug
-                image_number = post_image_counter_dict.setdefault(post_id, 1)
+                
                 safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
-                image_obj_prefix = os.path.join('3d-model', *term_slug_list)
-                post_image_counter_dict[post_id] = image_number + 1
-                if image_id and image_link:
-                    ext = get_ext_from_img_src(image_link)
-                    image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(image_number).rjust(3, "0")}{ext}')
-                    post_image_futures.append(executor.submit(put_post_image, image_id, image_link, image_obj_key))
-                if not (post_meta_id and post_meta_image_str):
-                    continue
-                if post_id in downloaded_post_meta:
-                    continue
+                image_obj_prefix_dict[post_id] = os.path.join('3d-model', *term_slug_list)
+
+            for index, (post_id, image_id, image_link) in enumerate(image_attachment_list):
+                ext = get_ext_from_img_src(image_link)
+                image_obj_prefix = image_obj_prefix_dict[post_id]
+                image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(index + 1).rjust(3, "0")}{ext}')
+                post_image_futures.append(executor.submit(put_post_image, image_id, image_link, image_obj_key))
+            for post_id, post_meta_id, post_meta_image_str in external_image_list:
+                image_obj_prefix = image_obj_prefix_dict[post_id]
                 post_meta_image_futures.append(executor.submit(put_post_meta_image, post_meta_id, safe_post_name, image_obj_prefix, post_meta_image_str))
+            for post_id, post_content in post_content_list:
+                image_obj_prefix = image_obj_prefix_dict[post_id]
                 post_content_futures.append(executor.submit(put_post_content_image, post_id, safe_post_name, image_obj_prefix, post_content))
             print(f'total post image: {len(post_image_futures)}')
             print(f'total post meta image: {len(post_meta_image_futures)}')
