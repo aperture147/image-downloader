@@ -297,8 +297,10 @@ def main():
     else:
         backup_post_image_csv()
         backup_post_meta_image_csv()
+        backup_post_content_csv()
         init_post_image_csv()
         init_post_meta_image_csv()
+        init_post_content_csv()
     
     for i in range(last_chunk, chunk_count):
         with ThreadPoolExecutor() as executor:
@@ -340,7 +342,9 @@ def main():
                     continue
                 post_meta_image_futures.append(executor.submit(put_post_meta_image, post_meta_id, safe_post_name, image_obj_prefix, post_meta_image_str))
                 post_content_futures.append(executor.submit(put_post_content_image, post_id, safe_post_name, image_obj_prefix, post_content))
-
+            print(f'total post image: {len(post_image_futures)}')
+            print(f'total post meta image: {len(post_meta_image_futures)}')
+            print(f'total post content image: {len(post_content_futures)}')
             for future in as_completed(post_image_futures):
                 image_id, image_url, image_obj_key = future.result()
                 if not image_obj_key:
@@ -375,6 +379,7 @@ def main():
         print('checkpoint saved')
         append_post_image_csv(post_list_rows)
         append_post_meta_image_csv(post_meta_rows)
+        append_post_content_csv(post_content_rows)
         print('post csv updated')
         print('waiting for cooldown on 1-3s')
         sleep(1 + random.randint(0, 2))
