@@ -331,10 +331,10 @@ def main():
                 image_number = post_image_counter_dict.setdefault(post_id, 1)
                 safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
                 image_obj_prefix = os.path.join('3d-model', *term_slug_list)
-                ext = get_ext_from_img_src(image_link)
-                image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(image_number).rjust(3, "0")}{ext}')
                 post_image_counter_dict[post_id] = image_number + 1
                 if image_id and image_link:
+                    ext = get_ext_from_img_src(image_link)
+                    image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(image_number).rjust(3, "0")}{ext}')
                     post_image_futures.append(executor.submit(put_post_image, image_id, image_link, image_obj_key))
                 if not (post_meta_id and post_meta_image_str):
                     continue
