@@ -126,7 +126,7 @@ def get_external_image_list(post_id_list):
         cur.execute(f"""
             SELECT p.id, pm.meta_id, pm.meta_value
             FROM {table_prefix}posts AS p
-            LEFT JOIN {table_prefix}postmeta AS pm
+            JOIN {table_prefix}postmeta AS pm
                 ON p.ID = pm.post_id
                 AND pm.meta_key = '_external_images'
             WHERE p.id IN %s
@@ -151,7 +151,7 @@ def get_image_attachment_list(post_id_list):
         cur.execute(f"""
             SELECT p.id, image_p.id, image_p.guid
             FROM {table_prefix}posts AS p
-            LEFT JOIN {table_prefix}posts AS image_p
+            JOIN {table_prefix}posts AS image_p
                 ON p.ID = image_p.post_parent
                 AND image_p.post_type = 'attachment'
                 AND image_p.post_mime_type LIKE %s
