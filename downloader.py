@@ -378,7 +378,8 @@ def main():
             post_content_futures = []
 
             image_obj_prefix_dict = {}
-
+            safe_post_name_dict = {}
+            
             for post_id, post_name in post_name_list:
                 post_taxonomy = post_taxonomy_dict.get(post_id, {})
                 post_category_id_list = post_taxonomy.get('category', [])
@@ -389,18 +390,22 @@ def main():
                     term_slug_list.append(re.sub(URL_UNSAFE_CHARACTER_REGEX, '', taxonomy_dict[category_id][1])) # safe slug
                 
                 safe_post_name = re.sub(URL_UNSAFE_CHARACTER_REGEX, '', post_name)
+                safe_post_name_dict[post_id] = safe_post_name
                 image_obj_prefix_dict[post_id] = os.path.join('3d-model', *term_slug_list)
 
             for index, (post_id, image_id, image_link) in enumerate(image_attachment_list):
                 ext = get_ext_from_img_src(image_link)
                 image_obj_prefix = image_obj_prefix_dict[post_id]
+                safe_post_name = safe_post_name_dict[post_id]
                 image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(index + 1).rjust(3, "0")}{ext}')
                 post_image_futures.append(executor.submit(put_post_image, image_id, image_link, image_obj_key))
             for post_id, post_meta_id, post_meta_image_str in external_image_list:
                 image_obj_prefix = image_obj_prefix_dict[post_id]
+                safe_post_name = safe_post_name_dict[post_id]
                 post_meta_image_futures.append(executor.submit(put_post_meta_image, post_meta_id, safe_post_name, image_obj_prefix, post_meta_image_str))
             for post_id, post_content in post_content_list:
                 image_obj_prefix = image_obj_prefix_dict[post_id]
+                safe_post_name = safe_post_name_dict[post_id]
                 post_content_futures.append(executor.submit(put_post_content_image, post_id, safe_post_name, image_obj_prefix, post_content))
             print(f'total post image: {len(post_image_futures)}')
             print(f'total post meta image: {len(post_meta_image_futures)}')
