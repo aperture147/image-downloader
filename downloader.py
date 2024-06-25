@@ -429,7 +429,7 @@ def main():
                 if post_meta_params:
                     cur.executemany(f'UPDATE {table_prefix}postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
                 if post_content_params:
-                    cur.executemany(f'UPDATE {table_prefix}posts SET post_content=%s WHERE meta_id=%s', post_content_params)
+                    cur.executemany(f'UPDATE {table_prefix}posts SET post_content=%s WHERE id=%s', post_content_params)
             
             db_conn.commit()
         end = perf_counter()
