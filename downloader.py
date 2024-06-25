@@ -426,10 +426,13 @@ def main():
             with db_conn.cursor() as cur:
                 if params:
                     cur.executemany(f'UPDATE {table_prefix}posts SET guid=%s WHERE id=%s', params)
+                    print(f'post attachment updated')
                 if post_meta_params:
                     cur.executemany(f'UPDATE {table_prefix}postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
+                    print(f'post meta updated')
                 if post_content_params:
                     cur.executemany(f'UPDATE {table_prefix}posts SET post_content=%s WHERE id=%s', post_content_params)
+                    print(f'post content updated')
             
             db_conn.commit()
         end = perf_counter()
