@@ -53,6 +53,11 @@ config.read('config.ini')
 
 mysql_config = config['mysql']
 s3_config = config['s3']
+downloader_config = config['downloader']
+
+post_content_image = bool(int(downloader_config['post_content_image']))
+post_meta_image = bool(int(downloader_config['post_meta_image']))
+post_attachment_image = bool(int(downloader_config['post_attachment_image']))
 
 db_conn = pymysql.connect(
     host=mysql_config['host'], port=int(mysql_config['port']),
@@ -342,9 +347,9 @@ def main():
         print('processing chunk', i)
         with ThreadPoolExecutor() as executor:
             chunk = post_id_list[i * CHUNK_SIZE: (i+1) * CHUNK_SIZE]
-            image_attachment_list = get_image_attachment_list(chunk)
-            external_image_list = get_external_image_list(chunk)
-            post_content_list = get_post_content_list(chunk)
+            image_attachment_list = get_image_attachment_list(chunk) if post_attachment_image else []
+            external_image_list = get_external_image_list(chunk) if post_meta_image else []
+            post_content_list = get_post_content_list(chunk) if post_content_image else []
             post_name_list = get_post_name(chunk)
 
             print('total post:', len(post_name_list))
@@ -415,9 +420,12 @@ def main():
         if not dry_run:
             db_conn.ping(reconnect=True)
             with db_conn.cursor() as cur:
-                cur.executemany(f'UPDATE {table_prefix}posts SET guid=%s WHERE id=%s', params)
-                cur.executemany(f'UPDATE {table_prefix}postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
-                cur.executemany(f'UPDATE {table_prefix}posts SET post_content=%s WHERE meta_id=%s', post_content_params)
+                if params:
+                    cur.executemany(f'UPDATE {table_prefix}posts SET guid=%s WHERE id=%s', params)
+                if post_meta_params:
+                    cur.executemany(f'UPDATE {table_prefix}postmeta SET meta_value=%s WHERE meta_id=%s', post_meta_params)
+                if post_content_params:
+                    cur.executemany(f'UPDATE {table_prefix}posts SET post_content=%s WHERE meta_id=%s', post_content_params)
             
             db_conn.commit()
         end = perf_counter()
