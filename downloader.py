@@ -296,7 +296,11 @@ def put_post_content_image(post_id, safe_post_name, image_obj_prefix, post_conte
 
     img_tag_list = soup.find_all('img')
     for index, img_tag in enumerate(img_tag_list):
+        if 'src' not in img_tag.attrs:
+            print('no image in', str(img_tag))
+            continue
         image_url: str = img_tag.attrs['src']
+        
         ext = get_ext_from_img_src(image_url)
         if ext not in {'.png', '.jpg', '.jpeg'} and not image_url.startswith('https://drive.google.com/uc'):
             continue
