@@ -332,6 +332,10 @@ def main():
     print('total posts', len(post_id_list))
     chunk_count = math.ceil(len(post_id_list) / CHUNK_SIZE)
     print('total chunk', chunk_count)
+    print('post content image:', post_content_image)
+    print('post meta image:', post_meta_image)
+    print('post attachment image:', post_attachment_image)
+    
     last_chunk = read_checkpoint()
     if last_chunk:
         print('last checkpoint chunk:', last_chunk)
