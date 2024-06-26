@@ -302,6 +302,8 @@ def put_post_content_image(post_id, safe_post_name, image_obj_prefix, post_conte
         image_url: str = img_tag.attrs['src']
         
         ext = get_ext_from_img_src(image_url)
+        if 'hoaxuyenviet.vn' in image_url:
+            continue
         if ext not in {'.png', '.jpg', '.jpeg'} and not image_url.startswith('https://drive.google.com/uc'):
             continue
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-content-{str(index).rjust(3, "0")}{ext}')
