@@ -269,7 +269,7 @@ def download_and_put_image_to_s3(image_url, s3_object_key):
         r.raise_for_status()
         img_content = r.content
     except HTTPError as e:
-        if e.response.status_code == 404:
+        if e.response.status_code in [400, 401, 403, 404]:
             return False
         raise e
     resp = s3_client.put_object(
