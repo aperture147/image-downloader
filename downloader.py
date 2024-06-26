@@ -345,6 +345,7 @@ def main():
     last_chunk = read_checkpoint()
     if last_chunk:
         print('last checkpoint chunk:', last_chunk)
+        last_chunk += 1
     else:
         backup_post_image_csv()
         backup_post_meta_image_csv()
