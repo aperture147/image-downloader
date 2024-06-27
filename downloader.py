@@ -58,6 +58,8 @@ downloader_config = config['downloader']
 post_content_image = bool(int(downloader_config['post_content_image']))
 post_meta_image = bool(int(downloader_config['post_meta_image']))
 post_attachment_image = bool(int(downloader_config['post_attachment_image']))
+allowed_extensions_str = downloader_config['allowed_extensions']
+allowed_extensions_set = set(f'.{x.strip()}' for x in allowed_extensions_str.split(','))
 
 db_conn = pymysql.connect(
     host=mysql_config['host'], port=int(mysql_config['port']),
@@ -291,6 +293,16 @@ def put_post_image(image_id, image_url, s3_object_key):
         return image_id, image_url, None
     return image_id, image_url, s3_object_key
 
+def check_image_url_and_get_extension(image_url):
+    if 'hoaxuyenviet.vn' in image_url:
+        print('hoaxuyenviet.vn is dead,', image_url, 'skipped')
+        return None
+    ext = get_ext_from_img_src(image_url)
+    if (ext not in allowed_extensions_set) and (not image_url.startswith('https://drive.google.com/uc')):
+        print('not allowed extension', ext, 'in', image_url)
+        return None
+    return ext
+
 def put_post_content_image(post_id, safe_post_name, image_obj_prefix, post_content):
     soup = BeautifulSoup(post_content, "lxml")
 
@@ -301,10 +313,8 @@ def put_post_content_image(post_id, safe_post_name, image_obj_prefix, post_conte
             continue
         image_url: str = img_tag.attrs['src']
         
-        ext = get_ext_from_img_src(image_url)
-        if 'hoaxuyenviet.vn' in image_url:
-            continue
-        if ext not in {'.png', '.jpg', '.jpeg'} and not image_url.startswith('https://drive.google.com/uc'):
+        ext = check_image_url_and_get_extension(image_url)
+        if not ext:
             continue
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-content-{str(index).rjust(3, "0")}{ext}')
         
@@ -319,7 +329,10 @@ def put_post_meta_image(meta_id, safe_post_name, image_obj_prefix, post_meta_str
     image_link_dict = phpserialize.loads(post_meta_str.encode(), decode_strings=True)
     data_dict = {}
     for index, image_url in image_link_dict.items():
-        ext = get_ext_from_img_src(image_url)
+        ext = check_image_url_and_get_extension(image_url)
+        if not ext:
+            data_dict[index] = image_url
+            continue
         s3_object_key = os.path.join(image_obj_prefix, f'{safe_post_name}-preview-{str(index).rjust(3, "0")}{ext}')
         exists = download_and_put_image_to_s3(image_url, s3_object_key)
         if not exists:
@@ -397,7 +410,9 @@ def main():
                 image_obj_prefix_dict[post_id] = os.path.join('3d-model', *term_slug_list)
 
             for index, (post_id, image_id, image_link) in enumerate(image_attachment_list):
-                ext = get_ext_from_img_src(image_link)
+                ext = check_image_url_and_get_extension(image_url)
+                if not ext:
+                    continue
                 image_obj_prefix = image_obj_prefix_dict[post_id]
                 safe_post_name = safe_post_name_dict[post_id]
                 image_obj_key = os.path.join(image_obj_prefix, f'{safe_post_name}-{str(index + 1).rjust(3, "0")}{ext}')
