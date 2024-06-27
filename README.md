@@ -2,14 +2,17 @@
 
 Tải xuống hình ảnh thumbnail trong Wordpress và upload vào S3/S3-compatible storage
 
-## Các dạng bài sẽ được tải ảnh
+## Những nơi chứa ảnh sẽ được tải
 
 - Attachtment có mimeype dạng `image/*` trong các `post` và `product`
 - Link ảnh chứa trong `postmeta`: `_external_images`
+- Link ảnh chứa trong tag `<img>` trong `post_content` trong bảng `posts`
 
 ## Tính năng
 
 - Checkpoint để có thể chạy recover giữa chừng
+- Bật tắt tải ảnh từ `post_content`, `postmeta` và `post_attachment` riêng biệt
+- Cho phép lựa chọn tải một số định dạng ảnh cụ thể
 
 ## HDSD
 
@@ -29,7 +32,14 @@ cp config.template.ini config.ini
 2. Điền các thông tin còn thiếu vào `config.ini`, ví dụ như dưới đây:
 
 ```ini
-[mysql]
+[downloader] ; bật tắt tải ảnh từ post_content, post_meta hay post attachment, 1 là bật, 0 là tắt
+post_content_image=1 
+post_meta_image=1
+post_attachment_image=1
+
+allowed_extensions=jpg,jpeg,png,svg,webp ; lựa chọn các định dạng ảnh để tải (kiểm tra thông qua định dạng đuôi)
+
+[mysql] ; config MySQL/MariaDB
 host=127.0.0.1
 port=3306
 user=some_user
