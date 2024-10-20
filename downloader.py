@@ -410,7 +410,7 @@ def main():
                 image_obj_prefix_dict[post_id] = os.path.join('3d-model', *term_slug_list)
 
             for index, (post_id, image_id, image_link) in enumerate(image_attachment_list):
-                ext = check_image_url_and_get_extension(image_url)
+                ext = check_image_url_and_get_extension(image_link)
                 if not ext:
                     continue
                 image_obj_prefix = image_obj_prefix_dict[post_id]
